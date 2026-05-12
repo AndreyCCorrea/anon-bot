@@ -1,0 +1,22 @@
+{
+  "name": "anonbot",
+  "version": "1.0.0",
+  "description": "Anonymous Media Exchange Telegram Bot",
+  "main": "dist/index.js",
+  "scripts": {
+    "start": "node dist/index.js",
+    "build": "npx prisma generate && tsc",
+    "dev": "ts-node src/index.ts"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.14.0",
+    "dotenv": "^16.4.5",
+    "grammy": "^1.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.12",
+    "prisma": "^5.14.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.5"
+  }
+}
