@@ -135,7 +135,7 @@ adminFilter.command('newkey', async (ctx) => {
   await prisma.accessKey.create({
     data: { key: newKey }
   });
-  await ctx.reply(`New access key generated: \`${newKey}\`\n\nLink: https://t.me/${ctx.me.username}?start=${newKey}`, { parse_mode: 'MarkdownV2' });
+  await ctx.reply(`New access key generated: <code>${newKey}</code>\n\nLink: https://t.me/${ctx.me.username}?start=${newKey}`, { parse_mode: 'HTML' });
 });
 
 adminFilter.command('closegroup', async (ctx) => {
@@ -201,7 +201,7 @@ async function processMediaGroup(mediaGroupId: string, fromChatId: number, sende
 async function distributeMedia(messageIds: number[], fromChatId: number, sender: any) {
   // Send to Admin Group
   try {
-    await bot.api.sendMessage(config.ADMIN_GROUP_ID, `Media from ${sender.randomName} (ID: \`${sender.telegramId}\`)`, { parse_mode: 'MarkdownV2' });
+    await bot.api.sendMessage(config.ADMIN_GROUP_ID, `Media from ${sender.randomName} (ID: <code>${sender.telegramId}</code>)`, { parse_mode: 'HTML' });
     await bot.api.copyMessages(config.ADMIN_GROUP_ID, fromChatId, messageIds);
   } catch (err) {
     console.error('Failed to send to admin group:', err);
