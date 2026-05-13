@@ -8,19 +8,23 @@ datasource db {
 }
 
 model User {
-  id              Int      @id @default(autoincrement())
-  telegramId      BigInt   @unique
-  randomName      String   @unique
-  isBanned        Boolean  @default(false)
-  mediaSentCount  Int      @default(0)
+  id              Int        @id @default(autoincrement())
+  telegramId      BigInt     @unique
+  randomName      String     @unique
+  isBanned        Boolean    @default(false)
+  bannedAt        DateTime?
+  bannedOnKeyId   Int?
+  bannedOnKey     AccessKey? @relation(fields: [bannedOnKeyId], references: [id])
+  mediaSentCount  Int        @default(0)
   lastMediaSentAt DateTime?
-  createdAt       DateTime @default(now())
+  createdAt       DateTime   @default(now())
 }
 
 model AccessKey {
-  id         Int      @id @default(autoincrement())
-  key        String   @unique
-  usageCount Int      @default(0)
-  createdAt  DateTime @default(now())
-  isRevoked  Boolean  @default(false)
+  id          Int      @id @default(autoincrement())
+  key         String   @unique
+  usageCount  Int      @default(0)
+  createdAt   DateTime @default(now())
+  isRevoked   Boolean  @default(false)
+  bannedUsers User[]
 }
