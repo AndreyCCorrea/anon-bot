@@ -2,6 +2,7 @@ import { bot } from './bot';
 import { prisma } from './db';
 import { run } from '@grammyjs/runner';
 import { initScheduler } from './scheduler';
+import { config } from './config';
 
 async function bootstrap() {
   try {
@@ -22,6 +23,7 @@ async function bootstrap() {
       console.log('Broadcasting server restart message...');
       const eligibleUsers = await prisma.user.findMany({ where: { isBanned: false, hasBlockedBot: false } });
       const startupMsg = "🤖 <b>We are back online!</b> The server experienced a brief interruption, but the bot is now fully operational again! 🚀✨";
+      bot.api.sendMessage(config.ADMIN_GROUP_ID, startupMsg, { parse_mode: 'HTML' }).catch(console.error);
       
       for (const user of eligibleUsers) {
         bot.api.sendMessage(Number(user.telegramId), startupMsg, { parse_mode: 'HTML' }).catch(async (err: any) => {

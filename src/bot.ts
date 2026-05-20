@@ -307,13 +307,15 @@ async function distributeMedia(items: any[], fromChatId: number, sender: any) {
 
   // Send to Admin Group
   try {
+    const banKeyboard = new InlineKeyboard().text('Ban User', `ban_${sender.telegramId}`);
     if (adminItems.length > 1) {
-      await bot.api.sendMediaGroup(config.ADMIN_GROUP_ID, adminItems);
+      const msgs = await bot.api.sendMediaGroup(config.ADMIN_GROUP_ID, adminItems);
+      await bot.api.sendMessage(config.ADMIN_GROUP_ID, `Manage user ${sender.telegramId}:`, { reply_parameters: { message_id: msgs[0].message_id }, reply_markup: banKeyboard });
     } else {
       const item = adminItems[0];
-      if (item.type === 'photo') await bot.api.sendPhoto(config.ADMIN_GROUP_ID, item.media, { caption: item.caption, parse_mode: 'HTML' });
-      else if (item.type === 'video') await bot.api.sendVideo(config.ADMIN_GROUP_ID, item.media, { caption: item.caption, parse_mode: 'HTML' });
-      else if (item.type === 'document') await bot.api.sendDocument(config.ADMIN_GROUP_ID, item.media, { caption: item.caption, parse_mode: 'HTML' });
+      if (item.type === 'photo') await bot.api.sendPhoto(config.ADMIN_GROUP_ID, item.media, { caption: item.caption, parse_mode: 'HTML', reply_markup: banKeyboard });
+      else if (item.type === 'video') await bot.api.sendVideo(config.ADMIN_GROUP_ID, item.media, { caption: item.caption, parse_mode: 'HTML', reply_markup: banKeyboard });
+      else if (item.type === 'document') await bot.api.sendDocument(config.ADMIN_GROUP_ID, item.media, { caption: item.caption, parse_mode: 'HTML', reply_markup: banKeyboard });
     }
   } catch (err) {
     console.error('Failed to send to admin group:', err);
@@ -360,4 +362,29 @@ async function distributeMedia(items: any[], fromChatId: number, sender: any) {
 // Error handler
 bot.catch((err) => {
   console.error('Error in bot:', err);
+});
+
+adminFilter.callbackQuery(/^ban_(\d+)$/, async (ctx) => {
+  const telegramId = parseInt(ctx.match[1], 10);
+  
+  const activeKey = await prisma.accessKey.findFirst({
+    where: { isRevoked: false },
+    orderBy: { createdAt: 'desc' }
+  });
+
+  await prisma.user.update({
+    where: { telegramId },
+    data: { 
+      isBanned: true,
+      bannedAt: new Date(),
+      bannedOnKeyId: activeKey ? activeKey.id : null
+    }
+  });
+  
+  await ctx.answerCallbackQuery('User banned successfully.');
+  await ctx.editMessageReplyMarkup({ reply_markup: new InlineKeyboard().text('✅ Banned', 'noop') }).catch(() => {});
+});
+
+adminFilter.callbackQuery('noop', async (ctx) => {
+  await ctx.answerCallbackQuery();
 });

@@ -2,6 +2,7 @@ import cron from 'node-cron';
 import { bot } from './bot';
 import { prisma } from './db';
 import { getAllMedia, deleteAllMedia } from './mediaDb';
+import { config } from './config';
 
 export function initScheduler() {
   // 03:00 UTC - Warn shutdown
@@ -9,6 +10,7 @@ export function initScheduler() {
     console.log('Running 03:00 UTC Job: Broadcasting shutdown warning');
     const eligibleUsers = await prisma.user.findMany({ where: { isBanned: false, hasBlockedBot: false } });
     const msg = "🌙 <b>Attention!</b> The bot has stopped receiving media for the night. You have <b>30 minutes</b> to save any media you want to keep. After that, all media sent today will be deleted! ⏳";
+    bot.api.sendMessage(config.ADMIN_GROUP_ID, msg, { parse_mode: 'HTML' }).catch(console.error);
     for (const user of eligibleUsers) {
       bot.api.sendMessage(Number(user.telegramId), msg, { parse_mode: 'HTML' }).catch(async (err: any) => {
         if (err.error_code === 403) {
@@ -37,6 +39,7 @@ export function initScheduler() {
     console.log('Running 09:00 UTC Job: Broadcasting startup warning');
     const eligibleUsers = await prisma.user.findMany({ where: { isBanned: false, hasBlockedBot: false } });
     const msg = "☀️ <b>Good Morning!</b> The bot is now receiving media again. Let's start sharing! 🎉🚀";
+    bot.api.sendMessage(config.ADMIN_GROUP_ID, msg, { parse_mode: 'HTML' }).catch(console.error);
     for (const user of eligibleUsers) {
       bot.api.sendMessage(Number(user.telegramId), msg, { parse_mode: 'HTML' }).catch(async (err: any) => {
         if (err.error_code === 403) {
