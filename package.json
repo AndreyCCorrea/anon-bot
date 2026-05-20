@@ -9,12 +9,17 @@
     "dev": "ts-node src/index.ts"
   },
   "dependencies": {
+    "@grammyjs/runner": "^2.0.3",
     "@prisma/client": "^5.14.0",
+    "better-sqlite3": "^12.10.0",
     "dotenv": "^16.4.5",
-    "grammy": "^1.23.0"
+    "grammy": "^1.23.0",
+    "node-cron": "^4.2.1"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20.12.12",
+    "@types/node-cron": "^3.0.11",
     "prisma": "^5.14.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.4.5"

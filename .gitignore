@@ -1,1 +1,5 @@
-note_modules
+node_modules/
+dist/
+.env
+*.db
+anon-bot.zip

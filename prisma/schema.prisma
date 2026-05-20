@@ -12,6 +12,7 @@ model User {
   telegramId      BigInt     @unique
   randomName      String     @unique
   isBanned        Boolean    @default(false)
+  hasBlockedBot   Boolean    @default(false)
   bannedAt        DateTime?
   bannedOnKeyId   Int?
   bannedOnKey     AccessKey? @relation(fields: [bannedOnKeyId], references: [id])

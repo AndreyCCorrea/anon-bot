@@ -1,6 +1,7 @@
 import { Bot, Context, InlineKeyboard } from 'grammy';
 import { config } from './config';
 import { prisma, generateRandomName, generateAccessKey } from './db';
+import { insertMedia } from './mediaDb';
 
 export const bot = new Bot(config.BOT_TOKEN);
 
@@ -31,6 +32,10 @@ bot.use(async (ctx, next) => {
     const user = await prisma.user.findUnique({
       where: { telegramId: ctx.from.id }
     });
+    if (user && user.hasBlockedBot) {
+      await prisma.user.update({ where: { id: user.id }, data: { hasBlockedBot: false } });
+      user.hasBlockedBot = false;
+    }
     (ctx as any).session = { user }; // Note: not actually using grammy sessions, just attaching to ctx
   }
   await next();
@@ -59,7 +64,10 @@ bot.command('start', async (ctx) => {
               bannedOnKeyId: null
             } 
           });
-          await prisma.accessKey.update({ where: { id: accessKey.id }, data: { usageCount: { increment: 1 } } });
+          const updatedKey = await prisma.accessKey.update({ where: { id: accessKey.id }, data: { usageCount: { increment: 1 } } });
+          if (updatedKey.usageCount >= 500) {
+            bot.api.sendMessage(config.ADMIN_GROUP_ID, `⚠️ <b>ALERT:</b> The access key <code>${updatedKey.key}</code> has exhausted all its 500 slots. Please generate a new key using /newkey! 🔑`, { parse_mode: 'HTML' }).catch(console.error);
+          }
           user.isBanned = false;
           await ctx.reply('✅ Your new access key is valid. You have been unbanned.');
         } else {
@@ -109,10 +117,14 @@ bot.command('start', async (ctx) => {
     }
   });
 
-  await prisma.accessKey.update({
+  const updatedKey = await prisma.accessKey.update({
     where: { id: accessKey.id },
     data: { usageCount: { increment: 1 } }
   });
+
+  if (updatedKey.usageCount >= 500) {
+    bot.api.sendMessage(config.ADMIN_GROUP_ID, `⚠️ <b>ALERT:</b> The access key <code>${updatedKey.key}</code> has exhausted all its 500 slots. Please generate a new key using /newkey! 🔑`, { parse_mode: 'HTML' }).catch(console.error);
+  }
 
   const shareUrl = `https://t.me/${ctx.me.username}?start=${currentKey}`;
   const keyboard = new InlineKeyboard().url('🚀 Share Bot', `https://t.me/share/url?url=${encodeURIComponent(shareUrl)}`);
@@ -188,6 +200,11 @@ adminFilter.command('closegroup', async (ctx) => {
 
 // Main media handler for users
 bot.on(['message:photo', 'message:video', 'message:document'], async (ctx) => {
+  const utcHour = new Date().getUTCHours();
+  if (utcHour >= 3 && utcHour < 9) {
+    return ctx.reply('🚫 <b>Sorry!</b> The bot has stopped receiving media for the night. We will resume at 09:00 AM UTC! 🌙✨', { parse_mode: 'HTML' });
+  }
+
   const user = (ctx as any).session?.user;
   if (!user || user.isBanned) return;
 
@@ -243,7 +260,9 @@ bot.on(['message:photo', 'message:video', 'message:document'], async (ctx) => {
   if (mediaGroupId) {
     if (!mediaGroups.has(mediaGroupId)) {
       const timeout = setTimeout(() => {
-        processMediaGroup(mediaGroupId, ctx.from!.id, user);
+        processMediaGroup(mediaGroupId, ctx.from!.id, user).catch(err => {
+          console.error('Error processing media group:', err);
+        });
       }, 1000);
       mediaGroups.set(mediaGroupId, { items: [inputMedia], timeout });
     } else {
@@ -251,7 +270,9 @@ bot.on(['message:photo', 'message:video', 'message:document'], async (ctx) => {
     }
   } else {
     // Single media
-    await distributeMedia([inputMedia], ctx.from!.id, user);
+    distributeMedia([inputMedia], ctx.from!.id, user).catch(err => {
+      console.error('Error distributing media:', err);
+    });
   }
 });
 
@@ -303,6 +324,7 @@ async function distributeMedia(items: any[], fromChatId: number, sender: any) {
   const eligibleUsers = await prisma.user.findMany({
     where: {
       isBanned: false,
+      hasBlockedBot: false,
       mediaSentCount: { gte: REQUIRED_MEDIA_COUNT },
       lastMediaSentAt: { gt: twelveHoursAgo },
       telegramId: { not: sender.telegramId } // don't send to self
@@ -313,17 +335,24 @@ async function distributeMedia(items: any[], fromChatId: number, sender: any) {
   for (const user of eligibleUsers) {
     try {
       if (userItems.length > 1) {
-        await bot.api.sendMediaGroup(Number(user.telegramId), userItems);
+        const msgs = await bot.api.sendMediaGroup(Number(user.telegramId), userItems);
+        msgs.forEach(m => insertMedia(user.telegramId.toString(), m.message_id));
       } else {
         const item = userItems[0];
-        if (item.type === 'photo') await bot.api.sendPhoto(Number(user.telegramId), item.media, { caption: item.caption, parse_mode: 'HTML' });
-        else if (item.type === 'video') await bot.api.sendVideo(Number(user.telegramId), item.media, { caption: item.caption, parse_mode: 'HTML' });
-        else if (item.type === 'document') await bot.api.sendDocument(Number(user.telegramId), item.media, { caption: item.caption, parse_mode: 'HTML' });
+        let msg;
+        if (item.type === 'photo') msg = await bot.api.sendPhoto(Number(user.telegramId), item.media, { caption: item.caption, parse_mode: 'HTML' });
+        else if (item.type === 'video') msg = await bot.api.sendVideo(Number(user.telegramId), item.media, { caption: item.caption, parse_mode: 'HTML' });
+        else if (item.type === 'document') msg = await bot.api.sendDocument(Number(user.telegramId), item.media, { caption: item.caption, parse_mode: 'HTML' });
+        if (msg) insertMedia(user.telegramId.toString(), msg.message_id);
       }
       // Wait a bit to avoid hitting rate limits
       await new Promise(resolve => setTimeout(resolve, 50));
-    } catch (err) {
-      console.error(`Failed to send to user ${user.telegramId}:`, err);
+    } catch (err: any) {
+      if (err.error_code === 403) {
+        await prisma.user.update({ where: { telegramId: user.telegramId }, data: { hasBlockedBot: true } }).catch(() => {});
+      } else {
+        console.error(`Failed to send to user ${user.telegramId}:`, err);
+      }
     }
   }
 }
