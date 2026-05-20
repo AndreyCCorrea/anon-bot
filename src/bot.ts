@@ -26,6 +26,45 @@ async function getActiveKey(): Promise<string | null> {
   return key ? key.key : null;
 }
 
+export async function performBan(telegramId: number | bigint): Promise<boolean> {
+  const tId = BigInt(telegramId);
+  const userToBan = await prisma.user.findUnique({ where: { telegramId: tId } });
+  if (userToBan && !userToBan.isBanned) {
+    const activeKey = await prisma.accessKey.findFirst({
+      where: { isRevoked: false },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    await prisma.user.update({
+      where: { telegramId: tId },
+      data: { 
+        isBanned: true,
+        bannedAt: new Date(),
+        bannedOnKeyId: activeKey ? activeKey.id : null
+      }
+    });
+
+    if (userToBan.registeredWithKeyId) {
+      const key = await prisma.accessKey.findUnique({ where: { id: userToBan.registeredWithKeyId } });
+      if (key && key.usageCount > 0) {
+        await prisma.accessKey.update({
+          where: { id: key.id },
+          data: { usageCount: { decrement: 1 } }
+        });
+      }
+    }
+    return true;
+  }
+  return false;
+}
+
+const RULES_MSG = `
+📋 <b>Bot Rules & Info:</b>
+• <b>Requirement:</b> You must send <b>10 media files</b> to start receiving media from others.
+• <b>Operating Hours:</b> We pause media delivery from 03:00 AM to 09:00 AM UTC.
+• <b>Inactivity Ban:</b> ⚠️ You will be automatically banned if you remain inactive for more than 36 hours without sending any media!
+`.trim();
+
 // Middleware to inject user object if exists
 bot.use(async (ctx, next) => {
   if (ctx.from) {
@@ -61,7 +100,8 @@ bot.command('start', async (ctx) => {
             data: { 
               isBanned: false,
               bannedAt: null,
-              bannedOnKeyId: null
+              bannedOnKeyId: null,
+              registeredWithKeyId: accessKey.id
             } 
           });
           const updatedKey = await prisma.accessKey.update({ where: { id: accessKey.id }, data: { usageCount: { increment: 1 } } });
@@ -88,7 +128,7 @@ bot.command('start', async (ctx) => {
       keyboard.url('🛡️ Backup', config.BACKUP_LINK);
     }
     
-    const msg = `👋 Welcome back, <b>${user.randomName}</b>!\n\n⚠️ Please save our Backup Link in case this bot stops working.`;
+    const msg = `👋 Welcome back, <b>${user.randomName}</b>!\n\n⚠️ Please save our Backup Link in case this bot stops working.\n\n${RULES_MSG}`;
     return ctx.reply(msg, { reply_markup: keyboard, parse_mode: 'HTML' });
   }
 
@@ -114,6 +154,7 @@ bot.command('start', async (ctx) => {
     data: {
       telegramId: ctx.from!.id,
       randomName: generateRandomName(),
+      registeredWithKeyId: accessKey.id
     }
   });
 
@@ -132,7 +173,7 @@ bot.command('start', async (ctx) => {
     keyboard.url('🛡️ Backup', config.BACKUP_LINK);
   }
   
-  const msg = `✅ Authentication successful! You have been assigned the name <b>${newUser.randomName}</b>.\n\n⚠️ Please save our Backup Link in case this bot stops working.\n\n📸 You must send 10 media files to begin receiving media from others.`;
+  const msg = `✅ Authentication successful! You have been assigned the name <b>${newUser.randomName}</b>.\n\n⚠️ Please save our Backup Link in case this bot stops working.\n\n${RULES_MSG}`;
   await ctx.reply(msg, { reply_markup: keyboard, parse_mode: 'HTML' });
 });
 
@@ -144,19 +185,7 @@ adminFilter.command('ban', async (ctx) => {
   if (args.length < 1 || !args[0]) return ctx.reply('Usage: /ban <userId>');
   const telegramId = parseInt(args[0], 10);
   
-  const activeKey = await prisma.accessKey.findFirst({
-    where: { isRevoked: false },
-    orderBy: { createdAt: 'desc' }
-  });
-
-  await prisma.user.update({
-    where: { telegramId },
-    data: { 
-      isBanned: true,
-      bannedAt: new Date(),
-      bannedOnKeyId: activeKey ? activeKey.id : null
-    }
-  });
+  await performBan(telegramId);
   await ctx.reply(`🚫 User ${telegramId} has been banned.`);
 });
 
@@ -165,14 +194,24 @@ adminFilter.command('unban', async (ctx) => {
   if (args.length < 1 || !args[0]) return ctx.reply('Usage: /unban <userId>');
   const telegramId = parseInt(args[0], 10);
   
-  await prisma.user.update({
-    where: { telegramId },
-    data: { 
-      isBanned: false,
-      bannedAt: null,
-      bannedOnKeyId: null
+  const userToUnban = await prisma.user.findUnique({ where: { telegramId } });
+  if (userToUnban && userToUnban.isBanned) {
+    if (userToUnban.registeredWithKeyId) {
+      await prisma.accessKey.update({
+        where: { id: userToUnban.registeredWithKeyId },
+        data: { usageCount: { increment: 1 } }
+      });
     }
-  });
+
+    await prisma.user.update({
+      where: { telegramId },
+      data: { 
+        isBanned: false,
+        bannedAt: null,
+        bannedOnKeyId: null
+      }
+    });
+  }
   await ctx.reply(`✅ User ${telegramId} has been unbanned.`);
 });
 
@@ -413,19 +452,7 @@ bot.catch((err) => {
 adminFilter.callbackQuery(/^ban_(\d+)$/, async (ctx) => {
   const telegramId = parseInt(ctx.match[1], 10);
   
-  const activeKey = await prisma.accessKey.findFirst({
-    where: { isRevoked: false },
-    orderBy: { createdAt: 'desc' }
-  });
-
-  await prisma.user.update({
-    where: { telegramId },
-    data: { 
-      isBanned: true,
-      bannedAt: new Date(),
-      bannedOnKeyId: activeKey ? activeKey.id : null
-    }
-  });
+  await performBan(telegramId);
   
   await ctx.answerCallbackQuery('User banned successfully.');
   await ctx.editMessageReplyMarkup({ reply_markup: new InlineKeyboard().text('✅ Banned', 'noop') }).catch(() => {});

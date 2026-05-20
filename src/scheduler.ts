@@ -1,10 +1,45 @@
 import cron from 'node-cron';
-import { bot } from './bot';
+import { bot, performBan } from './bot';
 import { prisma } from './db';
 import { getAllMedia, deleteAllMedia } from './mediaDb';
 import { config } from './config';
 
 export function initScheduler() {
+  // Hourly - Autoban users inactive for 36 hours
+  cron.schedule('0 * * * *', async () => {
+    console.log('Running Hourly Job: Checking for 36-hour inactivity');
+    const thirtySixHoursAgo = new Date(Date.now() - 36 * 60 * 60 * 1000);
+
+    // Find users who haven't sent media in 36h (or since account creation)
+    const inactiveUsers = await prisma.user.findMany({
+      where: {
+        isBanned: false,
+        OR: [
+          { lastMediaSentAt: { lte: thirtySixHoursAgo } },
+          { lastMediaSentAt: null, createdAt: { lte: thirtySixHoursAgo } }
+        ]
+      }
+    });
+
+    if (inactiveUsers.length > 0) {
+      console.log(`Found ${inactiveUsers.length} inactive users to ban.`);
+      let bannedCount = 0;
+      for (const user of inactiveUsers) {
+        const banned = await performBan(Number(user.telegramId));
+        if (banned) {
+          bannedCount++;
+          // Send ban message
+          const msg = "🚫 <b>You have been automatically banned</b> because you were inactive for more than 36 hours without sending any media.\n\nYou must provide a new valid access key using /start <key> to rejoin.";
+          bot.api.sendMessage(Number(user.telegramId), msg, { parse_mode: 'HTML' }).catch(() => {});
+        }
+        await new Promise(r => setTimeout(r, 50));
+      }
+      if (bannedCount > 0) {
+        bot.api.sendMessage(config.ADMIN_GROUP_ID, `🤖 <b>Autoban Report:</b> Banned ${bannedCount} users for being inactive for 36 hours.`, { parse_mode: 'HTML' }).catch(() => {});
+      }
+    }
+  });
+
   // 03:00 UTC - Warn shutdown
   cron.schedule('0 3 * * *', async () => {
     console.log('Running 03:00 UTC Job: Broadcasting shutdown warning');
