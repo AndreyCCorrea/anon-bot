@@ -198,6 +198,52 @@ adminFilter.command('closegroup', async (ctx) => {
   await ctx.reply('🔒 All access keys have been revoked. No new users can join until /newkey is used.');
 });
 
+adminFilter.command('status', async (ctx) => {
+  const utcHour = new Date().getUTCHours();
+  const isSleepWindow = utcHour >= 3 && utcHour < 9;
+  const botStatus = isSleepWindow ? "😴 Sleeping (Paused)" : "🟢 Online & Active";
+
+  const totalActiveUsers = await prisma.user.count({
+    where: { isBanned: false, hasBlockedBot: false }
+  });
+
+  const twelveHoursAgo = new Date(Date.now() - INACTIVITY_LIMIT_MS);
+  
+  const receivingActiveUsers = await prisma.user.count({
+    where: {
+      isBanned: false,
+      hasBlockedBot: false,
+      mediaSentCount: { gte: REQUIRED_MEDIA_COUNT },
+      lastMediaSentAt: { gt: twelveHoursAgo }
+    }
+  });
+
+  const receivingInactiveUsers = totalActiveUsers - receivingActiveUsers;
+
+  const activeKey = await prisma.accessKey.findFirst({
+    where: { isRevoked: false },
+    orderBy: { createdAt: 'desc' }
+  });
+
+  const accessUses = activeKey ? `${activeKey.usageCount}/500` : "No active key";
+
+  const statusMsg = `
+📊 <b>Bot Status Report</b>
+
+🤖 <b>State:</b> ${botStatus}
+
+👥 <b>User Statistics:</b>
+• <b>Total Active Users:</b> ${totalActiveUsers}
+• <b>Receiving Active:</b> ${receivingActiveUsers}
+• <b>Receiving Inactive:</b> ${receivingInactiveUsers}
+
+🔑 <b>Current Access Key:</b>
+• <b>Uses:</b> ${accessUses}
+  `.trim();
+
+  await ctx.reply(statusMsg, { parse_mode: 'HTML' });
+});
+
 // Main media handler for users
 bot.on(['message:photo', 'message:video', 'message:document'], async (ctx) => {
   const utcHour = new Date().getUTCHours();
