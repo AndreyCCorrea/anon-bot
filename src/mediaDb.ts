@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import path from 'path';
 
 // Create or open the media.db file
-const dbPath = path.resolve(process.cwd(), 'media.db');
+const dbPath = process.env.MEDIA_DB_PATH || path.resolve(process.cwd(), 'media.db');
 const db = new Database(dbPath);
 
 // Initialize table if it doesn't exist
