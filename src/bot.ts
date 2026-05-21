@@ -242,6 +242,8 @@ adminFilter.command('status', async (ctx) => {
   const isSleepWindow = utcHour >= 3 && utcHour < 9;
   const botStatus = isSleepWindow ? "😴 Sleeping (Paused)" : "🟢 Online & Active";
 
+  const totalRegisteredUsers = await prisma.user.count();
+
   const totalActiveUsers = await prisma.user.count({
     where: { isBanned: false, hasBlockedBot: false }
   });
@@ -272,8 +274,9 @@ adminFilter.command('status', async (ctx) => {
 🤖 <b>State:</b> ${botStatus}
 
 👥 <b>User Statistics:</b>
-• <b>Total Active Users:</b> ${totalActiveUsers}
-• <b>Receiving Active:</b> ${receivingActiveUsers}
+• <b>Total Registered:</b> ${totalRegisteredUsers}
+• <b>Active (Unblocked/Unbanned):</b> ${totalActiveUsers}
+• <b>Receiving Active (Last 12h):</b> ${receivingActiveUsers}
 • <b>Receiving Inactive:</b> ${receivingInactiveUsers}
 
 🔑 <b>Current Access Key:</b>
@@ -281,6 +284,38 @@ adminFilter.command('status', async (ctx) => {
   `.trim();
 
   await ctx.reply(statusMsg, { parse_mode: 'HTML' });
+});
+
+// Share command
+bot.command('share', async (ctx) => {
+  const user = (ctx as any).session?.user;
+  if (!user || user.isBanned) return;
+
+  const currentKey = await getActiveKey();
+  let shareUrl = `https://t.me/${ctx.me.username}`;
+  if (currentKey) {
+    shareUrl += `?start=${currentKey}`;
+  }
+  
+  const keyboard = new InlineKeyboard().url('🚀 Share Bot', `https://t.me/share/url?url=${encodeURIComponent(shareUrl)}`);
+  if (config.BACKUP_LINK) {
+    keyboard.url('🛡️ Backup', config.BACKUP_LINK);
+  }
+
+  const shareMsg = `
+🚀 <b>Help us grow!</b>
+
+Share this bot with your friends or in <b>appropriate groups</b> so we can have more media circulating!
+
+⚠️ <b>IMPORTANT:</b> Please only share the bot in groups that are related to this content. Sharing in incorrect or strict groups can cause the bot to be reported and banned.
+
+Use the buttons below to share and to join our backup channel!
+  `.trim();
+
+  await ctx.reply(shareMsg, { reply_markup: keyboard, parse_mode: 'HTML' });
+
+  // Send confirmation to admin group
+  await bot.api.sendMessage(config.ADMIN_GROUP_ID, `📣 User <b>${user.randomName}</b> (ID: <code>${user.telegramId}</code>) used the /share command.`, { parse_mode: 'HTML' }).catch(console.error);
 });
 
 // Main media handler for users
