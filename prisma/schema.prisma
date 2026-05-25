@@ -32,3 +32,8 @@ model AccessKey {
   bannedUsers     User[]   @relation("BannedOnKey")
   registeredUsers User[]   @relation("RegisteredWithKey")
 }
+
+model SystemSetting {
+  key   String @id
+  value String
+}

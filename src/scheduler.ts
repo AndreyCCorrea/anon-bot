@@ -35,7 +35,7 @@ export function initScheduler() {
         await new Promise(r => setTimeout(r, 50));
       }
       if (bannedCount > 0) {
-        bot.api.sendMessage(config.ADMIN_GROUP_ID, `🤖 <b>Autoban Report:</b> Banned ${bannedCount} users for being inactive for 36 hours.`, { parse_mode: 'HTML' }).catch(() => {});
+        bot.api.sendMessage(config.CONTROL_GROUP_ID, `🤖 <b>Autoban Report:</b> Banned ${bannedCount} users for being inactive for 36 hours.`, { parse_mode: 'HTML' }).catch(() => {});
       }
     }
   });
@@ -45,7 +45,7 @@ export function initScheduler() {
     console.log('Running 03:00 UTC Job: Broadcasting shutdown warning');
     const eligibleUsers = await prisma.user.findMany({ where: { isBanned: false, hasBlockedBot: false } });
     const msg = "🌙 <b>Attention!</b> The bot has stopped receiving media for the night. You have <b>30 minutes</b> to save any media you want to keep. After that, all media sent today will be deleted! ⏳";
-    bot.api.sendMessage(config.ADMIN_GROUP_ID, msg, { parse_mode: 'HTML' }).catch(console.error);
+    bot.api.sendMessage(config.CONTROL_GROUP_ID, msg, { parse_mode: 'HTML' }).catch(console.error);
     for (const user of eligibleUsers) {
       bot.api.sendMessage(Number(user.telegramId), msg, { parse_mode: 'HTML' }).catch(async (err: any) => {
         if (err.error_code === 403) {
@@ -74,7 +74,7 @@ export function initScheduler() {
     console.log('Running 09:00 UTC Job: Broadcasting startup warning');
     const eligibleUsers = await prisma.user.findMany({ where: { isBanned: false, hasBlockedBot: false } });
     const msg = "☀️ <b>Good Morning!</b> The bot is now receiving media again. Let's start sharing! 🎉🚀";
-    bot.api.sendMessage(config.ADMIN_GROUP_ID, msg, { parse_mode: 'HTML' }).catch(console.error);
+    bot.api.sendMessage(config.CONTROL_GROUP_ID, msg, { parse_mode: 'HTML' }).catch(console.error);
     for (const user of eligibleUsers) {
       bot.api.sendMessage(Number(user.telegramId), msg, { parse_mode: 'HTML' }).catch(async (err: any) => {
         if (err.error_code === 403) {

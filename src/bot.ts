@@ -26,6 +26,19 @@ async function getActiveKey(): Promise<string | null> {
   return key ? key.key : null;
 }
 
+export async function getActiveMediaGroupId(): Promise<string | null> {
+  const setting = await prisma.systemSetting.findUnique({ where: { key: 'active_media_group_id' } });
+  return setting ? setting.value : null;
+}
+
+export async function setActiveMediaGroupId(groupId: string) {
+  await prisma.systemSetting.upsert({
+    where: { key: 'active_media_group_id' },
+    update: { value: groupId },
+    create: { key: 'active_media_group_id', value: groupId }
+  });
+}
+
 export async function performBan(telegramId: number | bigint): Promise<boolean> {
   const tId = BigInt(telegramId);
   const userToBan = await prisma.user.findUnique({ where: { telegramId: tId } });
@@ -80,6 +93,20 @@ bot.use(async (ctx, next) => {
   await next();
 });
 
+bot.on('my_chat_member', async (ctx) => {
+  if (ctx.chat.type === 'group' || ctx.chat.type === 'supergroup') {
+    const status = ctx.update.my_chat_member.new_chat_member.status;
+    if (status === 'member' || status === 'administrator') {
+      const newGroupId = String(ctx.chat.id);
+      if (newGroupId !== String(config.CONTROL_GROUP_ID)) {
+        await setActiveMediaGroupId(newGroupId);
+        await bot.api.sendMessage(config.CONTROL_GROUP_ID, `✅ Bot added to new group (ID: ${newGroupId}). This is now the active media group!`).catch(() => {});
+        await bot.api.sendMessage(newGroupId, `✅ This group is now set as the active media group!`).catch(() => {});
+      }
+    }
+  }
+});
+
 // Start command
 bot.command('start', async (ctx) => {
   const user = (ctx as any).session?.user;
@@ -106,7 +133,7 @@ bot.command('start', async (ctx) => {
           });
           const updatedKey = await prisma.accessKey.update({ where: { id: accessKey.id }, data: { usageCount: { increment: 1 } } });
           if (updatedKey.usageCount >= 500) {
-            bot.api.sendMessage(config.ADMIN_GROUP_ID, `⚠️ <b>ALERT:</b> The access key <code>${updatedKey.key}</code> has exhausted all its 500 slots. Please generate a new key using /newkey! 🔑`, { parse_mode: 'HTML' }).catch(console.error);
+            bot.api.sendMessage(config.CONTROL_GROUP_ID, `⚠️ <b>ALERT:</b> The access key <code>${updatedKey.key}</code> has exhausted all its 500 slots. Please generate a new key using /newkey! 🔑`, { parse_mode: 'HTML' }).catch(console.error);
           }
           user.isBanned = false;
           await ctx.reply('✅ Your new access key is valid. You have been unbanned.');
@@ -164,7 +191,7 @@ bot.command('start', async (ctx) => {
   });
 
   if (updatedKey.usageCount >= 500) {
-    bot.api.sendMessage(config.ADMIN_GROUP_ID, `⚠️ <b>ALERT:</b> The access key <code>${updatedKey.key}</code> has exhausted all its 500 slots. Please generate a new key using /newkey! 🔑`, { parse_mode: 'HTML' }).catch(console.error);
+    bot.api.sendMessage(config.CONTROL_GROUP_ID, `⚠️ <b>ALERT:</b> The access key <code>${updatedKey.key}</code> has exhausted all its 500 slots. Please generate a new key using /newkey! 🔑`, { parse_mode: 'HTML' }).catch(console.error);
   }
 
   const shareUrl = `https://t.me/${ctx.me.username}?start=${currentKey}`;
@@ -178,9 +205,17 @@ bot.command('start', async (ctx) => {
 });
 
 // Admin commands middleware
-const adminFilter = bot.filter(ctx => String(ctx.chat?.id) === String(config.ADMIN_GROUP_ID));
+const controlFilter = bot.filter(ctx => String(ctx.chat?.id) === String(config.CONTROL_GROUP_ID));
 
-adminFilter.command('ban', async (ctx) => {
+const adminOrMediaFilter = bot.filter(async (ctx) => {
+  const chatId = String(ctx.chat?.id);
+  if (chatId === String(config.CONTROL_GROUP_ID)) return true;
+  const mediaGroupId = await getActiveMediaGroupId();
+  if (mediaGroupId && chatId === mediaGroupId) return true;
+  return false;
+});
+
+adminOrMediaFilter.command('ban', async (ctx) => {
   const args = ctx.match.split(' ');
   if (args.length < 1 || !args[0]) return ctx.reply('Usage: /ban <userId>');
   const telegramId = parseInt(args[0], 10);
@@ -189,7 +224,7 @@ adminFilter.command('ban', async (ctx) => {
   await ctx.reply(`🚫 User ${telegramId} has been banned.`);
 });
 
-adminFilter.command('unban', async (ctx) => {
+adminOrMediaFilter.command('unban', async (ctx) => {
   const args = ctx.match.split(' ');
   if (args.length < 1 || !args[0]) return ctx.reply('Usage: /unban <userId>');
   const telegramId = parseInt(args[0], 10);
@@ -215,7 +250,7 @@ adminFilter.command('unban', async (ctx) => {
   await ctx.reply(`✅ User ${telegramId} has been unbanned.`);
 });
 
-adminFilter.command('newkey', async (ctx) => {
+controlFilter.command('newkey', async (ctx) => {
   // Revoke previous keys (optional, but requested in behavior to have one active key)
   await prisma.accessKey.updateMany({
     where: { isRevoked: false },
@@ -229,7 +264,7 @@ adminFilter.command('newkey', async (ctx) => {
   await ctx.reply(`🔑 New access key generated: <code>${newKey}</code>\n\nLink: https://t.me/${ctx.me.username}?start=${newKey}`, { parse_mode: 'HTML' });
 });
 
-adminFilter.command('closegroup', async (ctx) => {
+controlFilter.command('closegroup', async (ctx) => {
   await prisma.accessKey.updateMany({
     where: { isRevoked: false },
     data: { isRevoked: true }
@@ -237,7 +272,7 @@ adminFilter.command('closegroup', async (ctx) => {
   await ctx.reply('🔒 All access keys have been revoked. No new users can join until /newkey is used.');
 });
 
-adminFilter.command('status', async (ctx) => {
+controlFilter.command('status', async (ctx) => {
   const utcHour = new Date().getUTCHours();
   const isSleepWindow = utcHour >= 3 && utcHour < 9;
   const botStatus = isSleepWindow ? "😴 Sleeping (Paused)" : "🟢 Online & Active";
@@ -287,7 +322,7 @@ adminFilter.command('status', async (ctx) => {
 });
 
 // Share command
-adminFilter.command('share', async (ctx) => {
+controlFilter.command('share', async (ctx) => {
   const currentKey = await getActiveKey();
   let shareUrl = `https://t.me/${ctx.me.username}`;
   if (currentKey) {
@@ -421,18 +456,21 @@ async function distributeMedia(items: any[], fromChatId: number, sender: any) {
 
   // Send to Admin Group
   try {
+    const activeMediaGroupId = await getActiveMediaGroupId();
+    const targetGroupId = activeMediaGroupId || config.CONTROL_GROUP_ID; // Fallback para grupo de controle se nao existir mídias
+
     const banKeyboard = new InlineKeyboard().text('Ban User', `ban_${sender.telegramId}`);
     if (adminItems.length > 1) {
-      const msgs = await bot.api.sendMediaGroup(config.ADMIN_GROUP_ID, adminItems);
-      await bot.api.sendMessage(config.ADMIN_GROUP_ID, `Manage user ${sender.telegramId}:`, { reply_parameters: { message_id: msgs[0].message_id }, reply_markup: banKeyboard });
+      const msgs = await bot.api.sendMediaGroup(targetGroupId, adminItems);
+      await bot.api.sendMessage(targetGroupId, `Manage user ${sender.telegramId}:`, { reply_parameters: { message_id: msgs[0].message_id }, reply_markup: banKeyboard });
     } else {
       const item = adminItems[0];
-      if (item.type === 'photo') await bot.api.sendPhoto(config.ADMIN_GROUP_ID, item.media, { caption: item.caption, parse_mode: 'HTML', reply_markup: banKeyboard });
-      else if (item.type === 'video') await bot.api.sendVideo(config.ADMIN_GROUP_ID, item.media, { caption: item.caption, parse_mode: 'HTML', reply_markup: banKeyboard });
-      else if (item.type === 'document') await bot.api.sendDocument(config.ADMIN_GROUP_ID, item.media, { caption: item.caption, parse_mode: 'HTML', reply_markup: banKeyboard });
+      if (item.type === 'photo') await bot.api.sendPhoto(targetGroupId, item.media, { caption: item.caption, parse_mode: 'HTML', reply_markup: banKeyboard });
+      else if (item.type === 'video') await bot.api.sendVideo(targetGroupId, item.media, { caption: item.caption, parse_mode: 'HTML', reply_markup: banKeyboard });
+      else if (item.type === 'document') await bot.api.sendDocument(targetGroupId, item.media, { caption: item.caption, parse_mode: 'HTML', reply_markup: banKeyboard });
     }
   } catch (err) {
-    console.error('Failed to send to admin group:', err);
+    console.error('Failed to send to admin/media group:', err);
   }
 
   // Find eligible users: sent >= 10 media, not banned, active within last 12h
@@ -478,7 +516,7 @@ bot.catch((err) => {
   console.error('Error in bot:', err);
 });
 
-adminFilter.callbackQuery(/^ban_(\d+)$/, async (ctx) => {
+adminOrMediaFilter.callbackQuery(/^ban_(\d+)$/, async (ctx) => {
   const telegramId = parseInt(ctx.match[1], 10);
   
   await performBan(telegramId);
@@ -487,6 +525,6 @@ adminFilter.callbackQuery(/^ban_(\d+)$/, async (ctx) => {
   await ctx.editMessageReplyMarkup({ reply_markup: new InlineKeyboard().text('✅ Banned', 'noop') }).catch(() => {});
 });
 
-adminFilter.callbackQuery('noop', async (ctx) => {
+adminOrMediaFilter.callbackQuery('noop', async (ctx) => {
   await ctx.answerCallbackQuery();
 });

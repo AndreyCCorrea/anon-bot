@@ -21,7 +21,7 @@ async function bootstrap() {
       { command: 'closegroup', description: 'Revoke all access keys' },
       { command: 'status', description: 'Bot Status Report' },
       { command: 'share', description: 'Get share link' }
-    ], { scope: { type: 'chat', chat_id: config.ADMIN_GROUP_ID } });
+    ], { scope: { type: 'chat', chat_id: config.CONTROL_GROUP_ID } });
 
     console.log('Starting bot...');
     await bot.init();
@@ -38,7 +38,7 @@ async function bootstrap() {
       console.log('Broadcasting server restart message...');
       const eligibleUsers = await prisma.user.findMany({ where: { isBanned: false, hasBlockedBot: false } });
       const startupMsg = "🤖 <b>We are back online!</b> The server experienced a brief interruption, but the bot is now fully operational again! 🚀✨";
-      bot.api.sendMessage(config.ADMIN_GROUP_ID, startupMsg, { parse_mode: 'HTML' }).catch(console.error);
+      bot.api.sendMessage(config.CONTROL_GROUP_ID, startupMsg, { parse_mode: 'HTML' }).catch(console.error);
       
       for (const user of eligibleUsers) {
         bot.api.sendMessage(Number(user.telegramId), startupMsg, { parse_mode: 'HTML' }).catch(async (err: any) => {
