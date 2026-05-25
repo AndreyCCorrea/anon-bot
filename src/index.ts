@@ -8,6 +8,21 @@ async function bootstrap() {
   try {
     console.log('Connecting to database...');
     await prisma.$connect();
+    
+    console.log('Registering bot commands...');
+    await bot.api.setMyCommands([
+      { command: 'start', description: 'Start the bot' }
+    ]);
+    
+    await bot.api.setMyCommands([
+      { command: 'ban', description: 'Ban a user' },
+      { command: 'unban', description: 'Unban a user' },
+      { command: 'newkey', description: 'Generate a new access key' },
+      { command: 'closegroup', description: 'Revoke all access keys' },
+      { command: 'status', description: 'Bot Status Report' },
+      { command: 'share', description: 'Get share link' }
+    ], { scope: { type: 'chat', chat_id: config.ADMIN_GROUP_ID } });
+
     console.log('Starting bot...');
     await bot.init();
     const runner = run(bot);

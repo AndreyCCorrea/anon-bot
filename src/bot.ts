@@ -178,7 +178,7 @@ bot.command('start', async (ctx) => {
 });
 
 // Admin commands middleware
-const adminFilter = bot.filter(ctx => ctx.chat?.id === config.ADMIN_GROUP_ID);
+const adminFilter = bot.filter(ctx => String(ctx.chat?.id) === String(config.ADMIN_GROUP_ID));
 
 adminFilter.command('ban', async (ctx) => {
   const args = ctx.match.split(' ');
@@ -287,10 +287,7 @@ adminFilter.command('status', async (ctx) => {
 });
 
 // Share command
-bot.command('share', async (ctx) => {
-  const user = (ctx as any).session?.user;
-  if (!user || user.isBanned) return;
-
+adminFilter.command('share', async (ctx) => {
   const currentKey = await getActiveKey();
   let shareUrl = `https://t.me/${ctx.me.username}`;
   if (currentKey) {
@@ -313,9 +310,6 @@ Use the buttons below to share and to join our backup channel!
   `.trim();
 
   await ctx.reply(shareMsg, { reply_markup: keyboard, parse_mode: 'HTML' });
-
-  // Send confirmation to admin group
-  await bot.api.sendMessage(config.ADMIN_GROUP_ID, `📣 User <b>${user.randomName}</b> (ID: <code>${user.telegramId}</code>) used the /share command.`, { parse_mode: 'HTML' }).catch(console.error);
 });
 
 // Main media handler for users

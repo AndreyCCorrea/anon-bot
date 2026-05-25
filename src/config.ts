@@ -3,7 +3,7 @@ dotenv.config();
 
 export const config = {
   BOT_TOKEN: process.env.BOT_TOKEN || '',
-  ADMIN_GROUP_ID: parseInt(process.env.ADMIN_GROUP_ID || '0', 10),
+  ADMIN_GROUP_ID: parseInt((process.env.ADMIN_GROUP_ID || '0').replace(/['"]/g, '').trim(), 10),
   DATABASE_URL: process.env.DATABASE_URL || 'file:./dev.db',
   BACKUP_LINK: process.env.BACKUP_LINK || '',
 };
