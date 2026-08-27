@@ -7,6 +7,13 @@ services:
       dockerfile: Dockerfile
     container_name: main-bot
     restart: always
+    environment:
+      - BOT_TOKEN
+      - ADMIN_USER_ID
+      - DATABASE_URL
+      - USER_INACTIVITY_HOURS
+      - AUTOBAN_INACTIVITY_HOURS
+      - KEY_USAGE_LIMIT
     volumes:
       - main_bot_data:/app/prisma
 
@@ -16,6 +23,13 @@ services:
       dockerfile: Dockerfile
     container_name: forwarder-bot
     restart: always
+    environment:
+      - API_ID
+      - API_HASH
+      - STRING_SESSION
+      - SOURCE_CHAT_ID
+      - TARGET_GROUP_ID
 
 volumes:
   main_bot_data:
+
