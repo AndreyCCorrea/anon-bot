@@ -70,12 +70,13 @@ async function main() {
     console.log(`📸 Media detected in message ${message.id}! Forwarding to target group ${targetGroupId}...`);
 
     try {
-      // Forward the media message to the target group
+      // Forward the media message to the target group without author header
       await client.forwardMessages(targetGroupId, {
         messages: [message.id],
         fromPeer: message.peerId || message.chatId || message.senderId,
+        dropAuthor: true,
       });
-      console.log(`✅ Message ${message.id} forwarded successfully.`);
+      console.log(`✅ Message ${message.id} forwarded successfully without author mention.`);
     } catch (err) {
       console.error(`❌ Failed to forward message ${message.id}:`, err);
     }

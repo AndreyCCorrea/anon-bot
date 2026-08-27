@@ -207,7 +207,13 @@ bot.command('start', async (ctx) => {
       keyboard.url('🛡️ Backup', config.BACKUP_LINK);
     }
     
-    const msg = `👋 Welcome back, <b>${user.randomName}</b>!\n\n⚠️ Please save our Backup Link in case this bot stops working.\n\n${getRulesMsg()}`;
+    const freshUser = await prisma.user.findUnique({ where: { id: user.id } });
+    const count = freshUser?.mediaSentCount || 0;
+    const progress = count >= REQUIRED_MEDIA_COUNT 
+      ? `🟢 <b>Status:</b> Active (${count} media sent - receiving media ✅)`
+      : `🟡 <b>Status:</b> ${count}/${REQUIRED_MEDIA_COUNT} media sent (send ${REQUIRED_MEDIA_COUNT - count} more to activate)`;
+
+    const msg = `👋 Welcome back, <b>${user.randomName}</b>!\n\n${progress}\n\n⚠️ Please save our Backup Link in case this bot stops working.\n\n${getRulesMsg()}`;
     return ctx.reply(msg, { reply_markup: keyboard, parse_mode: 'HTML' });
   }
 
@@ -347,6 +353,14 @@ adminFilter.command('status', async (ctx) => {
 
   const userInactivityCutoff = new Date(Date.now() - getInactivityLimitMs());
   
+  const qualifiedUsers = await prisma.user.count({
+    where: {
+      isBanned: false,
+      hasBlockedBot: false,
+      mediaSentCount: { gte: REQUIRED_MEDIA_COUNT }
+    }
+  });
+
   const receivingActiveUsers = await prisma.user.count({
     where: {
       isBanned: false,
@@ -373,7 +387,8 @@ adminFilter.command('status', async (ctx) => {
 👥 <b>User Statistics:</b>
 • <b>Total Registered:</b> ${totalRegisteredUsers}
 • <b>Active (Unblocked/Unbanned):</b> ${totalActiveUsers}
-• <b>Receiving Active (Last ${config.USER_INACTIVITY_HOURS}h):</b> ${receivingActiveUsers}
+• <b>Qualified (Sent >= 10 media):</b> ${qualifiedUsers}
+• <b>Receiving Active (Sent >= 10 & active in last ${config.USER_INACTIVITY_HOURS}h):</b> ${receivingActiveUsers}
 • <b>Receiving Inactive:</b> ${receivingInactiveUsers}
 
 🔑 <b>Current Access Key:</b>
@@ -420,26 +435,51 @@ bot.on(['message:photo', 'message:video', 'message:document'], async (ctx) => {
   const user = (ctx as any).session?.user;
   if (!user || user.isBanned) return;
 
-  // Track activity
+  // Track activity atomically to avoid race conditions with albums
   const now = new Date();
-  let mediaSentCount = user.mediaSentCount + 1;
-  
-  const timeSinceLastMedia = user.lastMediaSentAt ? now.getTime() - new Date(user.lastMediaSentAt).getTime() : 0;
-  if (user.lastMediaSentAt && timeSinceLastMedia > getInactivityLimitMs()) {
-    // Reset count to 1 if they were inactive for > USER_INACTIVITY_HOURS
-    mediaSentCount = 1;
+  const inactivityCutoff = new Date(Date.now() - getInactivityLimitMs());
+
+  let senderUser = user;
+  let wasInactive = false;
+  let reachedThreshold = false;
+
+  try {
+    const result = await prisma.$transaction(async (tx) => {
+      const freshUser = await tx.user.findUnique({ where: { id: user.id } });
+      if (!freshUser || freshUser.isBanned) return null;
+
+      const isInactive = Boolean(freshUser.lastMediaSentAt && freshUser.lastMediaSentAt < inactivityCutoff);
+      const newCount = isInactive ? 1 : freshUser.mediaSentCount + 1;
+
+      const saved = await tx.user.update({
+        where: { id: freshUser.id },
+        data: { 
+          mediaSentCount: newCount,
+          lastMediaSentAt: now
+        }
+      });
+
+      return { 
+        saved, 
+        wasInactive: isInactive, 
+        reachedThreshold: freshUser.mediaSentCount < REQUIRED_MEDIA_COUNT && newCount >= REQUIRED_MEDIA_COUNT 
+      };
+    });
+
+    if (!result) return;
+    senderUser = result.saved;
+    wasInactive = result.wasInactive;
+    reachedThreshold = result.reachedThreshold;
+  } catch (err) {
+    console.error('Error updating user media count in transaction:', err);
+    return;
+  }
+
+  if (wasInactive) {
     await ctx.reply(`⏳ You were inactive for more than ${config.USER_INACTIVITY_HOURS} hours. You must send 10 media files again to start receiving media.`);
   }
 
-  await prisma.user.update({
-    where: { id: user.id },
-    data: { 
-      mediaSentCount,
-      lastMediaSentAt: now
-    }
-  });
-
-  if (mediaSentCount === REQUIRED_MEDIA_COUNT) {
+  if (reachedThreshold) {
     await ctx.reply('🎉 You have sent 10 media files! You will now receive media from other users.');
   }
 
@@ -472,7 +512,7 @@ bot.on(['message:photo', 'message:video', 'message:document'], async (ctx) => {
   if (mediaGroupId) {
     if (!mediaGroups.has(mediaGroupId)) {
       const timeout = setTimeout(() => {
-        processMediaGroup(mediaGroupId, ctx.from!.id, user).catch(err => {
+        processMediaGroup(mediaGroupId, ctx.from!.id, senderUser).catch(err => {
           console.error('Error processing media group:', err);
         });
       }, 1000);
@@ -482,7 +522,7 @@ bot.on(['message:photo', 'message:video', 'message:document'], async (ctx) => {
     }
   } else {
     // Single media
-    distributeMedia([inputMedia], ctx.from!.id, user).catch(err => {
+    distributeMedia([inputMedia], ctx.from!.id, senderUser).catch(err => {
       console.error('Error distributing media:', err);
     });
   }
@@ -493,6 +533,29 @@ async function processMediaGroup(mediaGroupId: string, fromChatId: number, sende
   if (!group) return;
   mediaGroups.delete(mediaGroupId);
   await distributeMedia(group.items, fromChatId, sender);
+}
+
+async function parallelLimit<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>
+): Promise<R[]> {
+  const results: R[] = [];
+  let index = 0;
+
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (index < items.length) {
+      const currentIndex = index++;
+      try {
+        results[currentIndex] = await fn(items[currentIndex]);
+      } catch (e) {
+        // Individual item errors handled inside fn
+      }
+    }
+  });
+
+  await Promise.all(workers);
+  return results;
 }
 
 async function distributeMedia(items: any[], fromChatId: number, sender: any) {
@@ -517,22 +580,24 @@ async function distributeMedia(items: any[], fromChatId: number, sender: any) {
     userItems[0].parse_mode = 'HTML';
   }
 
-  // Send to Admin User (always receive media regardless of inactivity status)
+  // Send to Admin User asynchronously in parallel
   if (BigInt(config.ADMIN_USER_ID) !== BigInt(sender.telegramId)) {
-    try {
-      const banKeyboard = new InlineKeyboard().text('Ban User', `ban_${sender.telegramId}`);
-      if (adminItems.length > 1) {
-        const msgs = await bot.api.sendMediaGroup(config.ADMIN_USER_ID, adminItems);
-        await bot.api.sendMessage(config.ADMIN_USER_ID, `Manage user ${sender.telegramId}:`, { reply_parameters: { message_id: msgs[0].message_id }, reply_markup: banKeyboard });
-      } else {
-        const item = adminItems[0];
-        if (item.type === 'photo') await bot.api.sendPhoto(config.ADMIN_USER_ID, item.media, { caption: item.caption, parse_mode: 'HTML', reply_markup: banKeyboard });
-        else if (item.type === 'video') await bot.api.sendVideo(config.ADMIN_USER_ID, item.media, { caption: item.caption, parse_mode: 'HTML', reply_markup: banKeyboard });
-        else if (item.type === 'document') await bot.api.sendDocument(config.ADMIN_USER_ID, item.media, { caption: item.caption, parse_mode: 'HTML', reply_markup: banKeyboard });
+    (async () => {
+      try {
+        const banKeyboard = new InlineKeyboard().text('Ban User', `ban_${sender.telegramId}`);
+        if (adminItems.length > 1) {
+          const msgs = await bot.api.sendMediaGroup(config.ADMIN_USER_ID, adminItems);
+          await bot.api.sendMessage(config.ADMIN_USER_ID, `Manage user ${sender.telegramId}:`, { reply_parameters: { message_id: msgs[0].message_id }, reply_markup: banKeyboard });
+        } else {
+          const item = adminItems[0];
+          if (item.type === 'photo') await bot.api.sendPhoto(config.ADMIN_USER_ID, item.media, { caption: item.caption, parse_mode: 'HTML', reply_markup: banKeyboard });
+          else if (item.type === 'video') await bot.api.sendVideo(config.ADMIN_USER_ID, item.media, { caption: item.caption, parse_mode: 'HTML', reply_markup: banKeyboard });
+          else if (item.type === 'document') await bot.api.sendDocument(config.ADMIN_USER_ID, item.media, { caption: item.caption, parse_mode: 'HTML', reply_markup: banKeyboard });
+        }
+      } catch (err) {
+        console.error('Failed to send media to admin user:', err);
       }
-    } catch (err) {
-      console.error('Failed to send media to admin user:', err);
-    }
+    })();
   }
 
   // Find eligible users: sent >= 10 media, not banned, active within last USER_INACTIVITY_HOURS
@@ -549,9 +614,11 @@ async function distributeMedia(items: any[], fromChatId: number, sender: any) {
     }
   });
 
-  // Distribute to eligible users
-  for (const user of eligibleUsers) {
-    try {
+  if (eligibleUsers.length === 0) return;
+
+  // Send media to an individual user with 429 rate limit retry
+  const sendToUser = async (user: typeof eligibleUsers[0]) => {
+    const doSend = async () => {
       if (userItems.length > 1) {
         const msgs = await bot.api.sendMediaGroup(Number(user.telegramId), userItems);
         msgs.forEach(m => insertMedia(user.telegramId.toString(), m.message_id));
@@ -563,16 +630,28 @@ async function distributeMedia(items: any[], fromChatId: number, sender: any) {
         else if (item.type === 'document') msg = await bot.api.sendDocument(Number(user.telegramId), item.media, { caption: item.caption, parse_mode: 'HTML' });
         if (msg) insertMedia(user.telegramId.toString(), msg.message_id);
       }
-      // Wait a bit to avoid hitting rate limits
-      await new Promise(resolve => setTimeout(resolve, 50));
+    };
+
+    try {
+      await doSend();
     } catch (err: any) {
-      if (err.error_code === 403) {
+      if (err?.error_code === 403) {
         await prisma.user.update({ where: { telegramId: user.telegramId }, data: { hasBlockedBot: true } }).catch(() => {});
+      } else if (err?.error_code === 429) {
+        const retryAfter = (err?.parameters?.retry_after || 1) * 1000;
+        await new Promise(r => setTimeout(r, retryAfter));
+        try {
+          await doSend();
+        } catch {}
       } else {
-        console.error(`Failed to send to user ${user.telegramId}:`, err);
+        console.error(`Failed to send to user ${user.telegramId}:`, err?.message || err);
       }
     }
-  }
+  };
+
+  // Distribute to all eligible users concurrently in batches of 10 workers
+  const CONCURRENCY_LIMIT = 10;
+  await parallelLimit(eligibleUsers, CONCURRENCY_LIMIT, sendToUser);
 }
 
 // Error handler
