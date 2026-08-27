@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  main-bot:
+    build:
+      context: ./main-bot
+      dockerfile: Dockerfile
+    container_name: main-bot
+    restart: always
+    volumes:
+      - main_bot_data:/app/prisma
+
+  forwarder-bot:
+    build:
+      context: ./forwarder-bot
+      dockerfile: Dockerfile
+    container_name: forwarder-bot
+    restart: always
+
+volumes:
+  main_bot_data:

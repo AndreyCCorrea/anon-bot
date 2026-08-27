@@ -1,0 +1,20 @@
+{
+  "name": "forwarder-bot",
+  "version": "1.0.0",
+  "description": "Telegram Media Forwarder Userbot using StringSession",
+  "main": "dist/index.js",
+  "scripts": {
+    "start": "node dist/index.js",
+    "build": "tsc",
+    "dev": "ts-node src/index.ts"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "telegram": "^2.26.16"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.12",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.5"
+  }
+}
