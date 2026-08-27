@@ -8,6 +8,28 @@ export const bot = new Bot(config.BOT_TOKEN);
 const REQUIRED_MEDIA_COUNT = 10;
 const getInactivityLimitMs = () => config.USER_INACTIVITY_HOURS * 60 * 60 * 1000;
 
+export async function sendWithRetry(
+  chatId: number | string,
+  text: string,
+  options?: any,
+  retries = 3
+): Promise<any> {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      return await bot.api.sendMessage(chatId, text, options);
+    } catch (err: any) {
+      const isNetworkError = err?.code === 'ETIMEDOUT' || err?.errno === 'ETIMEDOUT' || err?.message?.includes('FetchError') || err?.message?.includes('network');
+      if (isNetworkError && attempt < retries) {
+        console.warn(`Network timeout sending message to ${chatId}. Retrying (${attempt}/${retries})...`);
+        await new Promise(r => setTimeout(r, 2000 * attempt));
+      } else {
+        throw err;
+      }
+    }
+  }
+}
+
+
 // In-memory buffer for media groups
 const mediaGroups = new Map<string, { items: any[], timeout: NodeJS.Timeout }>();
 

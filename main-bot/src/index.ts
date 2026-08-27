@@ -1,4 +1,4 @@
-import { bot } from './bot';
+import { bot, sendWithRetry } from './bot';
 import { prisma } from './db';
 import { run } from '@grammyjs/runner';
 import { initScheduler } from './scheduler';
@@ -35,15 +35,19 @@ async function bootstrap() {
       const utcHour = new Date().getUTCHours();
       if (utcHour >= 3 && utcHour < 9) return; // Silent during sleep window
       
+      // Small delay to allow container network to stabilize
+      await new Promise(r => setTimeout(r, 2000));
+
       console.log('Broadcasting server restart message...');
       const eligibleUsers = await prisma.user.findMany({ where: { isBanned: false, hasBlockedBot: false } });
       const startupMsg = "🤖 <b>We are back online!</b> The server experienced a brief interruption, but the bot is now fully operational again! 🚀✨";
-      bot.api.sendMessage(config.ADMIN_USER_ID, startupMsg, { parse_mode: 'HTML' }).catch(console.error);
+      
+      sendWithRetry(config.ADMIN_USER_ID, startupMsg, { parse_mode: 'HTML' }).catch(() => {});
       
       for (const user of eligibleUsers) {
         if (user.telegramId === BigInt(config.ADMIN_USER_ID)) continue;
-        bot.api.sendMessage(Number(user.telegramId), startupMsg, { parse_mode: 'HTML' }).catch(async (err: any) => {
-          if (err.error_code === 403) {
+        sendWithRetry(Number(user.telegramId), startupMsg, { parse_mode: 'HTML' }).catch(async (err: any) => {
+          if (err?.error_code === 403) {
             await prisma.user.update({ where: { telegramId: user.telegramId }, data: { hasBlockedBot: true } }).catch(() => {});
           }
         });
