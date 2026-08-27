@@ -256,6 +256,23 @@ bot.command('start', async (ctx) => {
   await ctx.reply(msg, { reply_markup: keyboard, parse_mode: 'HTML' });
 });
 
+// Backup command for all users
+bot.command('backup', async (ctx) => {
+  if (!config.BACKUP_LINK) {
+    return ctx.reply('⚠️ No backup link is currently configured.');
+  }
+
+  const keyboard = new InlineKeyboard().url('🛡️ Join Backup Channel', config.BACKUP_LINK);
+  const msg = `
+🛡️ <b>Backup Channel Link:</b>
+
+Save and join our official backup channel to stay updated if this bot ever gets blocked or encounters issues!
+  `.trim();
+
+  await ctx.reply(msg, { reply_markup: keyboard, parse_mode: 'HTML' });
+});
+
+
 
 // Admin commands middleware
 const adminFilter = bot.filter(ctx => ctx.from?.id === config.ADMIN_USER_ID);

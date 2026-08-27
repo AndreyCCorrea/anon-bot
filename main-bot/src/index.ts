@@ -11,7 +11,8 @@ async function bootstrap() {
     
     console.log('Registering bot commands...');
     await bot.api.setMyCommands([
-      { command: 'start', description: 'Start the bot' }
+      { command: 'start', description: 'Start the bot' },
+      { command: 'backup', description: 'Get backup link' }
     ]);
     
     await bot.api.setMyCommands([
