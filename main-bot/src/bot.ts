@@ -110,8 +110,40 @@ bot.command('start', async (ctx) => {
   const user = (ctx as any).session?.user;
   const payload = ctx.match; // The part after /start
   const currentKey = await getActiveKey();
+  const isAdmin = ctx.from?.id === config.ADMIN_USER_ID;
+
+  if (isAdmin) {
+    let adminUser = user;
+    if (!adminUser) {
+      adminUser = await prisma.user.create({
+        data: {
+          telegramId: ctx.from!.id,
+          randomName: 'Admin',
+        }
+      });
+    } else if (adminUser.isBanned) {
+      await prisma.user.update({
+        where: { id: adminUser.id },
+        data: { isBanned: false, bannedAt: null, bannedOnKeyId: null }
+      });
+    }
+
+    let shareUrl = `https://t.me/${ctx.me.username}`;
+    if (currentKey) {
+      shareUrl += `?start=${currentKey}`;
+    }
+
+    const keyboard = new InlineKeyboard().url('🚀 Share Bot', `https://t.me/share/url?url=${encodeURIComponent(shareUrl)}`);
+    if (config.BACKUP_LINK) {
+      keyboard.url('🛡️ Backup', config.BACKUP_LINK);
+    }
+
+    const msg = `👑 Welcome, <b>Admin</b>!\n\nYou have full administrative access. Use /newkey, /status, /ban, /unban, /closegroup, etc.\n\n${getRulesMsg()}`;
+    return ctx.reply(msg, { reply_markup: keyboard, parse_mode: 'HTML' });
+  }
 
   if (user) {
+
     if (user.isBanned) {
       if (payload) {
         const accessKey = await prisma.accessKey.findUnique({ where: { key: payload } });
