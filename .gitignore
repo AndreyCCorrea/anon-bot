@@ -1,5 +1,27 @@
+# Dependencies
 node_modules/
+**/node_modules/
+
+# Build outputs
 dist/
+**/dist/
+
+# Environment files
 .env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# SQLite Databases & Logs
 *.db
+*.db-journal
+dev.db
+*.log
+npm-debug.log*
+
+# System & OS files
+.DS_Store
+Thumbs.db
 anon-bot.zip
