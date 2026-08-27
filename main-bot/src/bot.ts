@@ -1,4 +1,4 @@
-import { Bot, Context, InlineKeyboard } from 'grammy';
+import { Bot, Context, GrammyError, HttpError, InlineKeyboard } from 'grammy';
 import { config } from './config';
 import { prisma, generateRandomName, generateAccessKey } from './db';
 import { insertMedia } from './mediaDb';
@@ -576,8 +576,28 @@ async function distributeMedia(items: any[], fromChatId: number, sender: any) {
 }
 
 // Error handler
-bot.catch((err) => {
-  console.error('Error in bot:', err);
+bot.catch(async (err) => {
+  const ctx = err.ctx;
+  const e = err.error;
+  const userId = ctx.from?.id;
+
+  if (e instanceof GrammyError) {
+    if (e.error_code === 403) {
+      console.warn(`⚠️ [403 Forbidden] Bot was blocked by user ${userId || 'unknown'} or chat is inaccessible: ${e.description}`);
+      if (userId) {
+        await prisma.user.update({
+          where: { telegramId: BigInt(userId) },
+          data: { hasBlockedBot: true }
+        }).catch(() => {});
+      }
+      return;
+    }
+    console.error(`❌ [GrammyError] Update ${ctx.update.update_id} failed:`, e.description);
+  } else if (e instanceof HttpError) {
+    console.error(`❌ [HttpError] Telegram API network error on update ${ctx.update.update_id}:`, e.message);
+  } else {
+    console.error(`❌ [Error] Unhandled error on update ${ctx.update.update_id}:`, e instanceof Error ? e.stack || e.message : e);
+  }
 });
 
 adminFilter.callbackQuery(/^ban_(\d+)$/, async (ctx) => {
